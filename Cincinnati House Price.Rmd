@@ -1,0 +1,268 @@
+---
+title: "TS Project for Cincinnati's house price"
+date: "2/20/2020"
+output: pdf_document
+---
+
+
+## 1.Introduction
+  Significant changes in the housing market can have a significant impact on the entire economy. House prices are rising every year, so a system is needed to predict future house prices. House price predictions can help people determine the sale price of a home, and can help customers arrange the right time to buy a home. There are several ways to determine the price of a house, one of which is time series analysis.
+  
+  Time series analysis can be used for various applications, such as stock market analysis, pattern recognition, earthquake prediction, economic prediction, census analysis, etc.All of these areas are related to time series because we inevitably end up using time series data as part of an overall analysis that drives financial decisions.
+  
+  Our research aims to create a house price prediction model using ARIMA model, including model specification, fitting and diagnostics, forecasting and disscussion. We use the house price data in Cincinnati from 2013 to 2019.
+```{r setup, include=FALSE}
+library(TSA)
+library(MASS)
+```
+```{r echo=FALSE, eval=TRUE}
+
+data<-read.csv("Metro_SingleFamily.csv",header=T)
+zillow_all <- ts(as.numeric(data[data$RegionName== 'Cincinnati, OH',-c(1,2,3)]), start=c(1996,04),frequency =12) 
+zillow<-window(zillow_all,start=2013)
+zillow_fit <- ts(zillow[-c(80,81,82,83,84)],start=c(2013,01),frequency = 12) #subset data to fit model, and withdraw the latest 5 data to compare with our forecast
+#zillow_fit <- ts(zillow[-c(80,81,82,83,84)])
+zillow_test <- ts(zillow[c(80,81,82,83,84)])
+plot(zillow_fit,ylab="Median Price of house in Cincinnati",type="o",cex=0.75)
+```
+First, we plot the house price data in Cincinnati from 2013 to 2019. There is a clear linear upward trend. Also, there is a notable nonconstant variance problem. Thus, we decide to solve these nonconstant variance and trend problem so that we can fit a suitable model for this dataset.
+
+## 2. Model Specification.
+```{r echo=FALSE, eval=TRUE, fig.height=4, fig.width=8, warning=FALSE}
+par(mfrow=c(1,2))
+BoxCox.ar(zillow_fit, method='burg')
+plot(log(zillow_fit),type="o")
+par(mfrow=c(1,2))
+acf(log(zillow_fit))
+```
+
+With the Box Cox transformation test, because the lambda close to zero, we decide to take logarithm of the original sequence to stablize the variance. Then, we observe the ACF plot for the log-data, and we find the stable decay of acf plot, which means there are still high auto-correlation among the data in different lags.This could because of the existing trend in data. Thus, we decide to difference the data to remove trend.
+```{r echo=FALSE, eval=TRUE, fig.height=4, fig.width=8, warning=FALSE}
+plot(diff(log(zillow_fit)),type="o")
+par(mfrow=c(1,2))
+acf(diff(log(zillow_fit)), lag.max=50, xaxt="n", xlab="Lag (months)")
+axis(1, at=0:50/12, labels=0:50)
+pacf(diff(log(zillow_fit)),lag.max=50, xaxt="n", xlab="Lag (months)") 
+axis(1, at=0:50/12, labels=0:50)
+eacf(diff(log(zillow_fit))) 
+```
+After differencing, we plot the differenced log-data. It's clear that the trend was removed. Next, we are supposed to use more plots to prepare some candidate models. ACF, PACF and EACF are very useful method to identify possible models. The ACF plot looks like cuts off after lag 2, but we can also find a overall decay trend. This is a signal that we are supposed to include MA(2) in our candidate models and this model possible requires a AR component. At the same time, we observed that the overall PACF plot decay slowly. This decay confirms our estimation of the MA component. Then, we turn to the EACF plot, it clearly confirms the MA(2) is a right discuss direction, and the AR component still require a further discussion.
+
+Therefore, we plan to fit the  autoregressive moving average (ARMA) models for this stationary time series. With the ACF, PACF and EACF output, we decide to try four candidate models:ARIMA(0,1,2),ARIMA(1,1,2),ARIMA(2,1,2) ,ARIMA(3,1,2)
+
+
+## 3. Model Fitting and Diagnositcs
+## 3.1 model fitting
+```{r echo=FALSE, eval=TRUE}
+arima012.log.zillow_fit = arima(log(zillow_fit),order=c(0,1,2),method='ML')
+arima012.log.zillow_fit
+#significant,AIC: -756
+```
+First, we try the pure MA(2) model based on the strong implication of EACF and ACF. From the result, we can find two ma terms are significant because the two-times standard error range of coefficient don't include zero. However, only comparison can help us to find the best model, we just continue to observe other model's Index.
+```{r echo=FALSE, eval=TRUE}
+arima112.log.zillow_fit = arima(log(zillow_fit),order=c(1,1,2),method='ML')
+arima112.log.zillow_fit
+#significant,AIC: -798
+
+arima212.log.zillow_fit = arima(log(zillow_fit),order=c(2,1,2),method='ML')
+arima212.log.zillow_fit
+#significant,AIC:-807.36 ------final choice
+
+arima312.log.zillow_fit = arima(log(zillow_fit),order=c(3,1,2),method='ML')
+arima312.log.zillow_fit
+#ar3 not significant, AIC: -805
+```
+We fit other three candidate models. First, we look at the AIC result of three models. The AIC of ARIMA(1,1,2) is -798, AIC of ARIMA(2,1,2) is -807 and AIC of ARIMA(3,1,2) is -805. In terms of the AIC, the ARIMA(2,1,2) and ARIMA (3,1,2) are good choices because we always want the minimum AIC results. Additionally, their sigma^2 are much more smaller than MA(2) and ARIMA(1,1,2), which means less variance in the residual of ARIMA(2,1,2) and ARIMA(3,1,2). Then, we observe the significance of coefficients in these two models. Only ar3 term in ARIMA(3,1,2) doesn't pass our examination of two-times standard error range. This maybe a warning showing that we shouldn't include this high-order term in our model even though its AIC and sigma^2 are not bad. Therefore, ARIMA(2,1,2) could be our best choice for this time series data.
+
+```{r echo=FALSE, eval=TRUE}
+#overfitting checking
+arima213.log.zillow_fit = arima(log(zillow_fit),order=c(2,1,3),method='ML')
+arima213.log.zillow_fit
+#significant,AIC: -774
+
+arima412.log.zillow_fit = arima(log(zillow_fit),order=c(4,1,2),method='ML')
+arima412.log.zillow_fit
+#ar3, ar4 insignificant,AIC: -806
+```
+Even though we fit some potential models and find the best choice for this time series data, we still want to confirm our modfel has fully considered all possible terms for AR and MA and no missing term. Thus, we try to seperately add an extra order for ARIMA(2,1,3) and ARIMA(3,1,2). That means we just played around two overfitted model and observed their coefficients and other index. The result is consistent with what we expected: the overfitted ARIMA(2,1,3) model has  insignificant term (ma1); the overfitted ARIMA(4,1,2) has two insignificant terms (ar3 and ar4). Thus, the overfitted model do cause the parameter redundancy problem. Based on this observation, we confirm our choice is good enough and we don't need a higher order model.
+
+## 3.2 Model Diagnostics
+```{r echo=FALSE, eval=TRUE}
+par(mfrow=c(2,2))
+plot(diff(log(zillow_fit)),type="o")
+plot(rstandard(arima112.log.zillow_fit),xlab="Time",ylab="Standardised residuals",type='o')
+abline(h=0)
+hist(rstandard(arima112.log.zillow_fit),xlab="Standardised residuals",main="")
+qqnorm(rstandard(arima112.log.zillow_fit),main="")
+qqline(rstandard(arima112.log.zillow_fit))
+shapiro.test(rstandard(arima112.log.zillow_fit))
+runs(rstandard(arima112.log.zillow_fit))
+tsdiag(arima112.log.zillow_fit,gof=20,omit.initial=F)
+```
+When we choose a model, we should remember a principle of parsimony: the model used should require the smallest number of parameters that will adequately represent the time series. Thus, we should consider lower order model as a first choice, because higher order model requires more coefficient and more data to modelling. 
+
+Holding that principle, we still decide to firstly look at the diagnostics of ARIMA (1,1,2) even though its AIC is not good as we discussed before. 
+
+On this stage, we should consder two things: Normality and Independence of residual (Is the residual a white noise or not). We use the histogram, Q-Q plot and Shapiro-wilk test to evaluate the normality. The standard residual plot show that most residuals are symmatrically distributed along the line y=0.The histogram shows our residual doesn't have a perfect normal distribution because of some extreme value over 3(That might because of the effect unnormal value of year 2014). This extreme value's effect is also reflected on the Q-Q plot and it cause some skew on the left and right side. Shapiro-Wilk test has a small pvalue 2.926e-11, which means we should reject the null hypothesis (The standardized residuals are normally distributed), but we know that mostly because of the shapiro.test is sensitive to extrme value. Thus, the normality of this residual is doubtful. We do a further consideration of independence, the runs test result 0.599 suggests that the residuals looks like independent. The ACF plot also looks like that our residuals is a white noise. However, The Ljung-Box test suggests this model maybe not appropriate because after lag 10, most p-value are lower than the boundary line p=0.05. That means we have statistically significant evidence against independence of the error terms in this model.
+```{r echo=FALSE, eval=TRUE}
+par(mfrow=c(2,2))
+plot(diff(log(zillow_fit)),type="o")
+plot(rstandard(arima212.log.zillow_fit),xlab="Time",ylab="Standardised residuals",type='o')
+abline(h=0)
+hist(rstandard(arima212.log.zillow_fit),xlab="Standardised residuals",main="")
+qqnorm(rstandard(arima212.log.zillow_fit),main="")
+qqline(rstandard(arima212.log.zillow_fit))
+shapiro.test(rstandard(arima212.log.zillow_fit))
+runs(rstandard(arima212.log.zillow_fit))
+tsdiag(arima212.log.zillow_fit,gof=20,omit.initial=F)
+```
+Then, we decide to look at the diagnostics of ARIMA(2,1,2). Based on the same evaluation rule as we discussed before, we can find the standardised residuals of this model also systematically distributed along y=0, and the histogram and Q-Q plot look similar as the previous model. A small improvment can be find on the left side of Q-Q plot: less skewness. Additionnaly, the p-value of shapiro-wilk test has a slight increase. However, the normality is still a concern because of the existence of the extreme value. We believe this also could be a deficiency our final model has. As far as the independence, the p-value 0.15 and the ACF plot collectively confirm our assumption that the residual of this model is a white noise. The pvalue for Ljung-Box are over 0.05, so we do not have statistically significant evidence against independence of the error terms in this model.It also confirms the white noise estimation and ARIMA(2,1,2) is appropriate.
+
+Therefore, we will finally use ARIMA(2,1,2)  to do the following forecasting even though we have the concern of the normality of residual.
+
+## 4. Model Predicting
+Forecasting is very important because there are too many prediction problems involving time components.Time series allow you to analyze major patterns such as trends, seasonality, periodicity and irregularities.As our data is median prices for single family homes in Cincinnati, by using our model, we can predict the prices of the homes in the future, which will help us make decisions such as buying or investing a house.
+
+Before the model specification, we split the time series into two series of length n = 84 and n=5. After the specification, fitting, and diagnostics on the first 79 observations, we can make predictions 5 steps ahead. Based on the prediction, we can do a comparison with the last 5 observations that we saved earlier. 
+We compute the estimated forecast and standard errors 10 months ahead based on the ARIMA (2,1,2) model fit. 
+
+First, we obtain the MMSE.We use Minimum Mean Square Error Forecasting as a criterion of our prediction, and our results are as follows, which shows that our prediction result is great.
+```{r echo=FALSE, eval=TRUE}
+# Obtain MMSE forecasts
+arima212.log.zillow_fit.predict <- predict(arima212.log.zillow_fit,n.ahead=10)
+round(arima212.log.zillow_fit.predict$pred,3)
+round(arima212.log.zillow_fit.predict$se,3)
+```
+Next,we compute 95% intervals. 
+```{r echo=FALSE, eval=TRUE}
+# Create lower and upper prediction interval bounds
+lower.pi<-arima212.log.zillow_fit.predict$pred-qnorm(0.975,0,1)*arima212.log.zillow_fit.predict$se
+upper.pi<-arima212.log.zillow_fit.predict$pred+qnorm(0.975,0,1)*arima212.log.zillow_fit.predict$se
+
+# Display prediction intervals
+data.frame(time=c(80:89),lower.pi,upper.pi)
+#prediction interval changes with the change of prediction value
+```
+Finally we plot the predicted value and the prediction interval. The black points are the predicted value and the red lines are the lower and upper bounds of the prediction interval. Since our final model contains differencing, the range of the prediction interval is getting larger and larger.
+```{r echo=FALSE, eval=TRUE}
+#plot the prediction interval
+plot(arima212.log.zillow_fit,n.ahead=10,col='red',type='b',pch=16,xlab="time",main = "Forecast")
+
+# Put prediction interval lines on plot (darker than default)
+lines(y=lower.pi,x=80:89,lwd=2,col="red",lty="dashed")
+lines(y=upper.pi,x=80:89,lwd=2,col="red",lty="dashed")
+```
+Since we saved a n=5 time series before model specification, now using prediction 5 steps ahead, we can compare the original data with our prediction, so that we can see if our model fitted accurately and predicted precisely. If yes, then we can use this model for further prediction and make business decisions based on that.
+```{r echo=FALSE, eval=TRUE}
+test<-log(zillow_test)
+pred<-ts(predict(arima212.log.zillow_fit,n.ahead=5)$pred)
+plot(test,type='o')
+lines(pred,col='red')
+```
+The plot above shows the comparision of the prediction and the original data. The black line reflects the pattern of the original data, and the red line shows the prediction. Those two lines show a same increasing trend and the values at each time point are almost the same. So we can conclude that our prediction is accurate.
+
+## 5. Discussion
+After the transformation and using the method of differences, the we identified that the ARIMA (2,1,2)  model fits the median sale prices data. Based on this data, we make precictions 10 steps ahead and there is an increasing trend of sale prices. Then we compare the 5 steps ahead prediction with the original data, which shows that this model’s forecasting precision is satisfactory. So this model can be used to forecast short-term housing pricewe and also as the tool to make further business decisions. Since commercial housing price affects national macroeconomic development and national quality of life in a large extent, with some simple modification, this model may be used in other industries.
+
+The ARIMA model only rely on historical data of some certain variable, which make its unique predominance in short-term forecast. But if we want to do a long-term forecast, since there are many other factors that affacts sale prices, time series analysis is limited. So even our model predicted precisely for 5 steps ahead, we still need to consider other factors when we are doing long-term decisions based on this model.
+  
+## 6. Appendix
+```{r echo=TRUE, eval=FALSE}
+library(TSA)
+library(MASS)
+data<-read.csv("Metro_SingleFamily.csv",header=T)
+zillow_all <- ts(as.numeric(data[data$RegionName== 'Cincinnati, OH',
+-c(1,2,3)]), start=c(1996,04),frequency =12) 
+zillow<-window(zillow_all,start=2013)
+zillow_fit <- ts(zillow[-c(80,81,82,83,84)],start=c(2013,01),frequency = 12) 
+#subset data to fit model, and withdraw the latest 5 data to compare with our forecast
+#zillow_fit <- ts(zillow[-c(80,81,82,83,84)])
+zillow_test <- ts(zillow[c(80,81,82,83,84)])
+plot(zillow_fit,ylab="Median Price of house in Cincinnati",type="o",cex=0.75)
+
+par(mfrow=c(1,2))
+BoxCox.ar(zillow_fit, method='burg')
+plot(log(zillow_fit),type="o")
+par(mfrow=c(1,2))
+acf(log(zillow_fit))
+
+plot(diff(log(zillow_fit)),type="o")
+par(mfrow=c(1,2))
+acf(diff(log(zillow_fit)), lag.max=50, xaxt="n", xlab="Lag (months)")
+axis(1, at=0:50/12, labels=0:50)
+pacf(diff(log(zillow_fit)),lag.max=50, xaxt="n", xlab="Lag (months)") 
+axis(1, at=0:50/12, labels=0:50)
+eacf(diff(log(zillow_fit))) 
+
+arima012.log.zillow_fit = arima(log(zillow_fit),order=c(0,1,2),method='ML')
+arima012.log.zillow_fit
+#significant,AIC: -756
+
+arima112.log.zillow_fit = arima(log(zillow_fit),order=c(1,1,2),method='ML')
+arima112.log.zillow_fit
+#significant,AIC: -798
+
+arima212.log.zillow_fit = arima(log(zillow_fit),order=c(2,1,2),method='ML')
+arima212.log.zillow_fit
+#significant,AIC:-807.36 ------final choice
+
+arima312.log.zillow_fit = arima(log(zillow_fit),order=c(3,1,2),method='ML')
+arima312.log.zillow_fit
+#ar3 not significant, AIC: -805
+
+#overfitting checking
+arima213.log.zillow_fit = arima(log(zillow_fit),order=c(2,1,3),method='ML')
+arima213.log.zillow_fit
+
+arima412.log.zillow_fit = arima(log(zillow_fit),order=c(4,1,2),method='ML')
+arima412.log.zillow_fit
+
+par(mfrow=c(2,2))
+plot(diff(log(zillow_fit)),type="o")
+plot(rstandard(arima112.log.zillow_fit),xlab="Time",ylab="Standardised residuals",type='o')
+abline(h=0)
+hist(rstandard(arima112.log.zillow_fit),xlab="Standardised residuals",main="")
+qqnorm(rstandard(arima112.log.zillow_fit),main="")
+qqline(rstandard(arima112.log.zillow_fit))
+shapiro.test(rstandard(arima112.log.zillow_fit))
+runs(rstandard(arima112.log.zillow_fit))
+tsdiag(arima112.log.zillow_fit,gof=20,omit.initial=F)
+
+par(mfrow=c(2,2))
+plot(diff(log(zillow_fit)),type="o")
+plot(rstandard(arima212.log.zillow_fit),xlab="Time",ylab="Standardised residuals",type='o')
+abline(h=0)
+hist(rstandard(arima212.log.zillow_fit),xlab="Standardised residuals",main="")
+qqnorm(rstandard(arima212.log.zillow_fit),main="")
+qqline(rstandard(arima212.log.zillow_fit))
+shapiro.test(rstandard(arima212.log.zillow_fit))
+runs(rstandard(arima212.log.zillow_fit))
+tsdiag(arima212.log.zillow_fit,gof=20,omit.initial=F)
+
+# Obtain MMSE forecasts
+arima212.log.zillow_fit.predict <- predict(arima212.log.zillow_fit,n.ahead=10)
+round(arima212.log.zillow_fit.predict$pred,3)
+round(arima212.log.zillow_fit.predict$se,3)
+
+# Create lower and upper prediction interval bounds
+lower.pi<-arima212.log.zillow_fit.predict$pred-qnorm(0.975,0,1)*arima212.log.zillow_fit.predict$se
+upper.pi<-arima212.log.zillow_fit.predict$pred+qnorm(0.975,0,1)*arima212.log.zillow_fit.predict$se
+
+# Display prediction intervals
+data.frame(time=c(80:89),lower.pi,upper.pi)
+#prediction interval changes with the change of prediction value
+
+
+#plot the prediction interval
+plot(arima212.log.zillow_fit,n.ahead=10,col='red',type='b',pch=16,xlab="time",main = "Forecast")
+
+# Put prediction interval lines on plot (darker than default)
+lines(y=lower.pi,x=80:89,lwd=2,col="red",lty="dashed")
+lines(y=upper.pi,x=80:89,lwd=2,col="red",lty="dashed")
+
+test<-log(zillow_test)
+pred<-ts(predict(arima212.log.zillow_fit,n.ahead=5)$pred)
+plot(test,type='o')
+lines(pred,col='red')
+
+```
